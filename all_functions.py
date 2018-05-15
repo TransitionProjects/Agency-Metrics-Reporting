@@ -179,7 +179,7 @@ class MetricsFunctions:
             return tuple(["600 participants will access employment services", 600, len(served.index)])
         elif type(staff_on_team) == str:
             served = services_df[
-                services_df["Service User Creating"].isin(staff_on_team) &
+                (services_df["Service User Creating"] == staff_on_team) &
                 services_df["Service Provide Provider"].str.contains("Support")
             ].drop_duplicates(subset="Client Uid")
             return tuple(["600 participants will access employment services", 600, len(served.index)])
@@ -932,6 +932,10 @@ class MetricsFunctions:
         """
         Used by: Agency, RentWell
 
+        This method will identify the participants who either had at least a
+        single service by TPI RentWell or a graduation service during the
+        reporting period.
+
         :param services_df:
         :return:
         """
@@ -960,6 +964,21 @@ class MetricsFunctions:
                 )
                 ]
             return tuple(["", "", len(services.index)])
+        elif type.lower() == "all served":
+            attended = services_df[
+                services_df["Service Provider Specific Code"].notna() &
+                (
+                    services_df["Service Provider Specific Code"].str.contains("RentWell - Attendence") |
+                    services_df["Service Provider Specific Code"].str.contains("RentWell - Graduation")
+                )
+            ].drop_duplicates(subset="Client Uid")
+            return attend[["Client Uid", "Service Provide Start Date"]]
+        elif type.lower() == "all graduates":
+            graduated = services_df[
+                services_df["Service Provider Specific Code"].notna() &
+                services_df["Service Provider Specific Code"].str.contains("RentWell - Graduation")
+            ].drop_duplicates(subset="Client Uid")
+            return graduated[["Client Uid", "Service Provide Start Date"]]
         else:
             return tuple(["ERROR", "ERROR", "ERROR"])
 
@@ -1351,7 +1370,7 @@ class MetricsFunctions:
             entries_df["Entry Exit Exit Date"].notnull()
         ]
         exiting_shelter["Exit"] = pd.to_datetime(exiting_shelter["Entry Exit Exit Date"]).dt.date
-        
+
         for row in exiting_shelter.index:
             client = exiting_shelter.loc[row, "Client Uid"]
             exit = exiting_shelter.loc[row, "Exit"]
@@ -1664,16 +1683,19 @@ class MetricsFunctions:
         :param provider:
         :return:
         """
-
-        hv_serviced = len(services_df[
-                              (services_df[
-                                   "Service Provider Specific Code"] == "Case Management Meeting - Home Visit") &
-                              (services_df["Service Provide Provider"].str.contains(provider))
-                              ].drop_duplicates(subset="Client Uid").index)
+        hv_services = [
+            "Case Management Meeting - Home Visit"
+        ]
+        hv_serviced = len(
+            services_df[
+                (services_df["Service Provider Specific Code"].isin(hv_services)) &
+                (services_df["Service Provide Provider"].str.contains(provider))
+            ].drop_duplicates(subset="Client Uid").index
+        )
 
         all_w_entry = len(entries_df[
-                              entries_df["Entry Exit Provider Id"].str.contains(provider)
-                          ].drop_duplicates(subset="Client Uid").index)
+            entries_df["Entry Exit Provider Id"].str.contains(provider)
+        ].drop_duplicates(subset="Client Uid").index)
         output = "{} / {} = {}%".format(hv_serviced, all_w_entry, 100 * (hv_serviced / all_w_entry))
         return tuple(["25% of participants will have quarterly home visits", "25%", output])
 
@@ -1907,6 +1929,34 @@ class MetricsFunctions:
                 100*(short_exits/all_exits)
             )
         ])
+
+    def percent_rent_well_housed(self, services_df, placements_df):
+        grads = self.count_rent_well(services_df, "all graduates")
+        placed = placements_df[
+            placements_df["Client Uid"].isin(grads["Client Uid"])
+        ]
+        merged = pd.merge(placed, grads, how="outer", on="Client Uid")
+        merged = merged[
+            (merged["Service Provide Start Date"] < merged["Placement Date(3072)"]) |
+            (merged["Service Provide Start Date"] == merged["Placement Date(3072)"])
+        ]
+        if len(merged.index > 0):
+            return tuple([
+                "35% of FY 17-18 graduates of TPI RentWell classes will gain housing",
+                "35%",
+                "{}/{}={}%".format(
+                    len(merged.index),
+                    len(grads.index),
+                    100*(len(merged.index)/len(grads.index))
+                )
+            ])
+
+        else:
+            return tuple([
+                "35% of FY 17-18 graduates of TPI RentWell classes will gain housing",
+                "35%",
+                "0%"
+            ])
 
     def percent_to_destination_by_shelter(self, entries_df, provider, type):
         """
